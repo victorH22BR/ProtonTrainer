@@ -1,0 +1,15 @@
+[package]
+name = "pt-proton"
+description = "Proton prefix and version detection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+pt-core.workspace = true
+pt-steam.workspace = true
+
+[lints]
+workspace = true

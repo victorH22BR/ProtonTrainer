@@ -1,0 +1,15 @@
+[package]
+name = "pt-trainers"
+description = "Trainer import, validation and game association"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+pt-core.workspace = true
+pt-database.workspace = true
+
+[lints]
+workspace = true
