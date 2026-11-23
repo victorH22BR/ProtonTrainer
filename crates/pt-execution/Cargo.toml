@@ -13,6 +13,10 @@ pt-steam.workspace = true
 pt-proton.workspace = true
 pt-diagnostics.workspace = true
 pt-database.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
