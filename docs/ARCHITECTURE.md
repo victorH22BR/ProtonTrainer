@@ -1,165 +1,114 @@
 # Arquitetura do ProtonTrainer
 
-> Status: **Fase 0** — esta é a arquitetura *proposta*. Itens marcados com
-> **(a validar)** dependem de fixtures reais da Steam/Proton e serão confirmados
-> nas fases indicadas. Nada aqui descreve funcionalidade já implementada.
+> Estado: MVP em implementação. Descoberta Steam/Proton, catálogo local de
+> trainers, persistência e lançamento explícito estão implementados. Formatos e
+> processos da Steam ainda precisam de validação em instalações reais variadas.
 
-## 1. Princípios
+## Princípios
 
-1. **Lógica de negócio fora da interface.** Tudo que pode ser testado sem janela
-   vive em crates `pt-*`. O shell Tauri apenas adapta comandos.
-2. **Detecção real, nunca palpite.** Prefixos, AppIDs e versões vêm de arquivos
-   da Steam/Proton validados; se não for possível confirmar, o erro é mostrado.
-3. **Sem shell.** Processos externos são criados com `Command` e argumentos
-   separados. Entradas são validadas antes de chegar lá (ex.: `AppId` só aceita
-   dígitos ASCII, então `--help` nunca vira argumento).
-4. **Ação explícita.** Nada é baixado ou executado sem clique do usuário.
-5. **Sem abstrações antecipadas.** Pontos de extensão (Lutris, Heroic, Bottles)
-   são documentados, mas só viram traits quando existir a segunda implementação.
+1. A lógica de negócio fica em crates Rust independentes do Tauri.
+2. Caminhos e AppIDs são descobertos e validados; o aplicativo não inventa prefixos.
+3. Processos externos são iniciados com argumentos separados, sem shell.
+4. Trainers só são importados por referência e só executados após ação explícita.
+5. Fixtures temporárias cobrem parsers e persistência sem depender da Steam real.
 
-## 2. Estrutura do repositório
+## Componentes
 
-```
-protontrainer/
-├── Cargo.toml              workspace Rust (apenas crates/*)
-├── crates/
-│   ├── pt-core/            tipos de domínio compartilhados (AppId)
-│   ├── pt-steam/           instalações, bibliotecas e jogos da Steam
-│   ├── pt-proton/          prefixos e versões do Proton
-│   ├── pt-trainers/        importação, validação e associação de trainers
-│   ├── pt-execution/       pipeline de execução e monitoramento
-│   ├── pt-diagnostics/     verificações de ambiente, erros e logs
-│   └── pt-database/        SQLite, migrations e repositórios
-├── src-tauri/              shell Tauri (comandos finos; fora do workspace)
-├── frontend/               React + TypeScript + Tailwind (Vite)
-├── docs/
-└── .github/workflows/ci.yml
-```
-
-## 3. Dependências entre crates
-
-```
-pt-core  ◄── pt-steam ◄── pt-proton ◄──┐
-   ▲                                   │
-   ├── pt-diagnostics ◄────────────────┤
-   ├── pt-database ◄── pt-trainers     ├── pt-execution
-   └─────────────────────────────────────┘
-
-src-tauri ──► todos os crates pt-*      frontend ──► src-tauri (IPC)
-```
-
-Regras: crates `pt-*` nunca dependem de `tauri`; `pt-core` não depende de nenhum
-outro crate do workspace; não há dependências circulares.
-
-## 4. Módulos
-
-### `pt-steam` — Fase 1
-
-- **Raízes da Steam:** nenhum caminho fixo. Estratégia: (1) caminho configurado
-  pelo usuário; (2) candidatos conhecidos (`$XDG_DATA_HOME/Steam`,
-  `~/.steam/steam`, `~/.steam/root`, Flatpak em
-  `~/.var/app/com.valvesoftware.Steam/.local/share/Steam`); (3) cada candidato
-  só é aceito se for validado (existe `steamapps/` e `libraryfolders.vdf`).
-  Links simbólicos são resolvidos e duplicatas removidas.
-- **Bibliotecas:** leitura de `steamapps/libraryfolders.vdf` **(a validar)**.
-- **Jogos:** leitura de `steamapps/appmanifest_<AppID>.acf` (`appid`, `name`,
-  `installdir`) **(a validar)**. Manifestos corrompidos geram diagnóstico, não
-  derrubam a listagem inteira.
-- **Parser VDF:** decisão (crate existente × parser próprio) fica para a Fase 1,
-  após testar com fixtures reais.
-
-### `pt-proton` — Fase 2
-
-- **Prefixo:** `<biblioteca>/steamapps/compatdata/<AppID>/pfx`, onde
-  `<biblioteca>` é a biblioteca que contém o manifesto do jogo. Um prefixo só é
-  considerado válido se o diretório existir e tiver marcadores de prefixo Wine
-  (ex.: `system.reg`) **(a validar)**. Se não existir (jogo nunca executado),
-  o resultado é "prefixo ausente", nunca um caminho inventado.
-- **Versão do Proton:** `compatdata/<AppID>/version` e o mapeamento em
-  `config/config.vdf` (`CompatToolMapping`) **(a validar)**.
-
-### `pt-trainers` — Fase 3
-
-- Trainers são **referenciados por caminho** (não copiados, não baixados).
-- Validação: caminho absoluto, arquivo regular, extensão `.exe`, legível;
-  detecção de arquivo movido/removido depois da importação.
-- Associação N:N entre jogos e trainers, com configurações por jogo.
-
-### `pt-execution` — Fase 4
-
-Pipeline (cada etapa devolve um erro tipado e acionável):
-
-1. Jogo existe e está instalado → 2. AppID → 3. prefixo válido →
-4. Protontricks disponível → 5. jogo em execução? → 6. executar → 7. registrar
-resultado.
-
-- **Comando preferencial:** `protontricks-launch --appid <AppID> <trainer.exe>`,
-  montado como `Command::new(..).arg(..)`, sem shell.
-- **Protontricks via Flatpak:** a forma de invocação será tratada na Fase 4
-  **(a validar)**.
-- **Jogo em execução:** inspeção de `/proc` (processos `reaper` com
-  `AppId=<AppID>` na linha de comando) **(a validar)**.
-- Processos externos ficam atrás de uma interface pequena para permitir mocks
-  nos testes (sem exigir Steam/Proton instalados).
-
-### `pt-diagnostics`
-
-Verificações de ambiente (Protontricks, Wine), mensagens de erro compreensíveis
-e configuração de logs estruturados (`tracing`, decidido quando houver o
-primeiro uso).
-
-### `pt-database` — Fase 3
-
-SQLite com migrations versionadas e `PRAGMA foreign_keys = ON`. Esquema proposto:
-
-| Tabela | Campos principais | Integridade |
+| Componente | Responsabilidade | Estado |
 |---|---|---|
-| `games` | `id`, `source`, `app_id`, `name`, `install_dir`, `library_path`, `last_seen_at` | `UNIQUE(source, app_id)` |
-| `trainers` | `id`, `name`, `exe_path`, `file_size`, `sha256`, `created_at` | — |
-| `game_trainers` | `game_id`, `trainer_id`, `launcher`, `enabled` | PK composta; FKs com `ON DELETE CASCADE` |
-| `settings` | `key`, `value` | PK `key` |
-| `executions` | `id`, `game_id`, `trainer_id`, `started_at`, `finished_at`, `status`, `exit_code`, `launcher`, `proton_version`, `argv`, `output_tail` | FK `game_id` cascade; `trainer_id` `SET NULL` |
-| `compatibility` | `id`, `game_id`, `trainer_id`, `proton_version`, `outcome`, `notes`, `last_tested_at` | `UNIQUE(game_id, trainer_id, proton_version)` |
+| `pt-core` | tipos compartilhados (`AppId`) | implementado |
+| `pt-steam` | encontrar raízes, bibliotecas e manifests VDF/ACF | implementado; parser local, fixtures |
+| `pt-proton` | validar prefixo Wine e consultar versão/ferramenta selecionada | implementado; fixtures |
+| `pt-trainers` | validar `.exe` local e manter referência | implementado |
+| `pt-database` | SQLite, jogos, trainers, associações, configurações e histórico | schema inicial implementado |
+| `pt-execution` | conferir jogo/prefixo, aguardar processo Steam e chamar Protontricks | implementado |
+| `pt-diagnostics` | verificações e mensagens de ambiente | reservado para expansão |
+| `pt-cli` | interface `ptrain run` | implementado |
+| `src-tauri` | comandos IPC, estado da aplicação e banco por usuário | implementado |
+| `frontend` | biblioteca, trainers, histórico e configurações | fluxo inicial implementado |
 
-O hash do trainer permite avisar se o arquivo mudou desde a importação.
-A coluna `source` já existe em `games` para a expansão futura (P2), mas só o
-valor `steam` é aceito no MVP.
+`src-tauri` fica fora do Cargo workspace para que os testes do núcleo não exijam
+WebKit/GTK. Ele mantém seu próprio `Cargo.lock`; CI compila ambos os projetos.
 
-## 5. Shell Tauri e frontend
+## Fluxos
 
-- Comandos Tauri são finos: validam entrada, chamam um crate `pt-*`, convertem o
-  resultado em um tipo serializável.
-- O frontend acessa o backend **somente** por `frontend/src/lib/backend.ts`, que
-  concentra nomes de comandos e tipos.
-- Permissões do Tauri (`capabilities/default.json`) começam mínimas
-  (`core:default`) e crescem apenas quando uma fase exigir.
-- Telas: Dashboard, Biblioteca, Detalhes do jogo, Trainers, Histórico,
-  Configurações. Na Fase 0 existem apenas como navegação com estado vazio.
+### Steam e jogos
 
-## 6. Segurança
+O detector considera caminho configurado, `$XDG_DATA_HOME/Steam`, raízes Steam
+usuais e instalação Flatpak. Aceita raízes que contenham
+`steamapps/libraryfolders.vdf`, resolve symlinks e remove duplicatas. As
+bibliotecas e jogos são lidos de `libraryfolders.vdf` e `appmanifest_*.acf`.
+Manifestos de jogo inválidos são ignorados para que um arquivo ruim não
+interrompa a listagem. Caminhos de `libraryfolders.vdf` precisam ser absolutos;
+`installdir` precisa ser um único componente, sem separadores ou traversal.
+Entradas VDF são limitadas a 8 MiB, 200 mil tokens e 64 níveis de aninhamento.
+A implementação cobre o formato VDF chave/valor com objetos, strings,
+comentários e escapes usados por esses arquivos; fixtures reais ainda podem
+revelar variações adicionais.
 
-- Sem shell, sem interpolação; argumentos separados e validados.
-- Nenhum download ou execução automática de trainers; nenhuma distribuição de
-  trainers de terceiros.
-- Sem privilégios elevados; sem armazenamento de credenciais.
-- Aviso visível ao usuário: trainers são executáveis de terceiros e podem
-  representar risco.
-- Não interferir em jogos online ou mecanismos antitrapaça: a interface avisará
-  e a documentação desaconselha o uso nesses cenários.
+### Proton
 
-## 7. Estratégia de testes
+O prefixo é derivado da biblioteca que contém o manifesto:
+`steamapps/compatdata/<AppID>/pfx`. Só é exposto quando contém `system.reg`.
+A versão vem de `compatdata/<AppID>/version`, com fallback para
+`CompatToolMapping` em `config/config.vdf`.
 
-- Testes unitários em cada crate; fixtures de árvores Steam/Proton falsas em
-  diretórios temporários, sem depender de instalação real.
-- Processos externos atrás de uma interface mockável (Fase 4).
-- CI: `fmt`, `clippy -D warnings`, `cargo test --workspace`, typecheck e build do
-  frontend, `cargo check` do shell Tauri.
-- Uma funcionalidade só é considerada pronta quando seus testes passam, não
-  apenas quando compila.
+### Trainers e execução
 
-## 8. Pontos de extensão (P2 — não implementados)
+O banco armazena o caminho canônico, tamanho e associação com o jogo; o arquivo
+nunca é copiado. Importação requer caminho absoluto, arquivo regular e extensão
+`.exe`. Na importação e antes da execução, o backend valida o marcador `MZ`, o
+offset do cabeçalho DOS e a assinatura `PE\0\0`. Também confere o jogo instalado
+e o prefixo, compara o tamanho com o registrado e revalida o arquivo após a
+espera do jogo. Em seguida aguarda o wrapper `reaper` da Steam e executa
+`protontricks-launch --appid <AppID> <caminho>`. Se o executável direto não
+estiver no `PATH`, tenta `flatpak run --command=protontricks-launch`. O caminho
+Steam configurado na interface é enviado ao fluxo de execução.
 
-Lutris, Heroic, Bottles, outras fontes de trainers, catálogo e verificação
-comunitária. A preparação nesta fase é só: coluna `games.source`, módulos
-independentes e a regra de extrair traits apenas quando houver uma segunda
-implementação concreta.
+A execução é iniciada exclusivamente por ação do usuário e registrada no banco.
+A aplicação avisa que trainers são software de terceiros e desaconselha o uso
+em jogos online ou com antitrapaça. A espera e o processo rodam em uma tarefa
+`spawn_blocking`, sem bloquear o event loop da janela. Cancelamento e progresso
+em tempo real permanecem como melhorias futuras. Os demais comandos Tauri que
+fazem I/O são despachados como comandos assíncronos. A saída do Protontricks é
+descartada no modo GUI; o CLI mantém a saída no terminal e usa mensagens de erro
+que não incluem caminhos absolutos.
+
+## Persistência
+
+SQLite fica no diretório de dados da aplicação. O schema inicial guarda jogos,
+trainers, associações, configurações e execuções com chaves estrangeiras e
+cascatas. `schema_migrations` controla a versão; a criação inicial é transacional
+e falhas são revertidas. Bancos de versão futura são rejeitados sem alteração.
+No Linux, o diretório de dados usa modo `0700` e o arquivo do banco `0600`.
+Próximas mudanças devem ser migrations incrementais, sem alterar bancos
+existentes destrutivamente.
+
+## Segurança e limites atuais
+
+- `AppId` aceita apenas inteiro positivo e serializa como número.
+- Os argumentos dos processos nunca passam por um shell.
+- O arquivo `.exe` não é baixado, copiado ou modificado.
+- O banco armazena nome e caminho absoluto do trainer; falhas no histórico usam
+  texto genérico para não persistir detalhes de caminho. Não há logger estruturado.
+- A UI não oferece execução automática nem integração com antitrapaça.
+- Os marcadores PE validam a estrutura inicial, mas não analisam malware nem
+  provam compatibilidade com um jogo ou segurança do executável.
+- Alterações no trainer com tamanho diferente são detectadas; alterações de
+  mesmo tamanho não são, pois hash de conteúdo ainda não foi implementado.
+- O monitoramento depende do formato de argumentos do `reaper` do Steam em
+  Linux. Flatpak, permissões `/proc` e variantes de cliente precisam de testes
+  em máquinas reais.
+- A importação usa caminho digitado; seletor nativo de arquivos ainda é uma
+  melhoria de interface pendente.
+- A detecção de jogo usa fixtures; compatibilidade real com cada distribuição,
+  biblioteca, modo Flatpak, variante Proton e trainer ainda não foi validada.
+- O monitoramento só espera o jogo iniciar. Não encerra o trainer se o jogo
+  fechar, e não acompanha progresso depois que o processo foi criado.
+
+## Verificação
+
+CI roda `fmt`, Clippy com warnings como erro, testes do workspace Rust, typecheck
+e build do frontend, além de `cargo check` do shell Tauri em Ubuntu 24.04.
+Execução de ponta a ponta requer Steam, Proton e Protontricks instalados e deve
+ser validada manualmente em diferentes distribuições antes de uma versão pública.

@@ -1,104 +1,34 @@
-import { useEffect, useState } from "react";
-import { getAppInfo, isTauri, type AppInfo } from "./lib/backend";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getAppInfo,getHistory,getSteamRoot,importTrainer,isTauri,launchTrainer,listGames,listTrainers,removeTrainer,setSteamRoot,type AppInfo,type Game,type RunRecord,type Trainer } from "./lib/backend";
 
-interface Section {
-  id: string;
-  label: string;
-  description: string;
-  phase: number;
+const sections=["Visão geral","Biblioteca","Trainers","Histórico","Configurações"] as const;
+type Section=(typeof sections)[number];
+const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
+
+export default function App(){
+ const [section,setSection]=useState<Section>("Visão geral");const [info,setInfo]=useState<AppInfo|null>(null);const [games,setGames]=useState<Game[]>([]);const [trainers,setTrainers]=useState<Trainer[]>([]);const [history,setHistory]=useState<RunRecord[]>([]);const [selected,setSelected]=useState<number|null>(null);const [trainerPath,setTrainerPath]=useState("");const [steamRoot,setSteamRootValue]=useState("");const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");
+ const trainerRequest=useRef(0);
+ const refreshGames=useCallback(async()=>{setBusy(true);setMessage("");try{const found=await listGames();setGames(found);if(selected===null&&found[0])setSelected(found[0].app_id);setMessage(`${found.length} jogo(s) encontrado(s).`)}catch(e){setMessage(errorText(e))}finally{setBusy(false)}},[selected]);
+ const refreshTrainers=useCallback(async()=>{const request=++trainerRequest.current;const gameId=selected;try{const found=await listTrainers(gameId??undefined);if(request===trainerRequest.current)setTrainers(found)}catch(e){if(request===trainerRequest.current)setMessage(errorText(e))}},[selected]);
+ const refreshHistory=useCallback(async()=>{try{setHistory(await getHistory())}catch(e){setMessage(errorText(e))}},[]);
+ useEffect(()=>{if(!isTauri()){setMessage("Abra o ProtonTrainer pelo aplicativo desktop para acessar o backend.");return}getAppInfo().then(setInfo).catch(e=>setMessage(errorText(e)));getSteamRoot().then(v=>setSteamRootValue(v??"")).catch(e=>setMessage(errorText(e)));void refreshGames();void refreshHistory()},[]);
+ useEffect(()=>{if(isTauri())void refreshTrainers()},[selected,refreshTrainers]);
+ async function addTrainer(){if(selected===null||!trainerPath.trim())return;setBusy(true);try{await importTrainer(trainerPath.trim(),selected);setTrainerPath("");setMessage("Trainer associado ao jogo.");await refreshTrainers()}catch(e){setMessage(errorText(e))}finally{setBusy(false)}}
+ async function runTrainer(t:Trainer){if(selected===null)return;if(!window.confirm("Trainers são executáveis de terceiros. Use por sua conta e risco e não os execute em jogos online ou com antitrapaça. Deseja continuar?"))return;setBusy(true);setMessage("Aguardando o jogo iniciar no Steam (limite: 120 s)…");try{const result=await launchTrainer(selected,t.id);setMessage(result.message)}catch(e){setMessage(errorText(e))}finally{setBusy(false);void refreshHistory()}}
+ async function saveSteamRoot(){setBusy(true);try{await setSteamRoot(steamRoot.trim());setMessage("Caminho salvo.");await refreshGames()}catch(e){setMessage(errorText(e))}finally{setBusy(false)}}
+ async function deleteTrainer(trainerId:number){setBusy(true);try{await removeTrainer(trainerId);setMessage("Trainer removido.");await refreshTrainers()}catch(e){setMessage(errorText(e))}finally{setBusy(false)}}
+ const currentGame=games.find(g=>g.app_id===selected);
+ return <div className="flex h-full min-h-screen">
+  <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-panel"><div className="px-5 py-5"><h1 className="text-lg font-semibold">Proton<span className="text-accent">Trainer</span></h1></div><nav className="flex-1 space-y-1 px-3" aria-label="Navegação principal">{sections.map(s=><button key={s} type="button" onClick={()=>setSection(s)} aria-current={section===s?"page":undefined} className={`w-full rounded-md px-3 py-2 text-left text-sm ${section===s?"bg-panel-raised text-accent":"text-muted hover:bg-panel-raised hover:text-fg"}`}>{s}</button>)}</nav><footer className="border-t border-line px-5 py-3 text-xs text-muted">{info?`v${info.version}`:"ProtonTrainer · desktop"}</footer></aside>
+  <main className="min-w-0 flex-1 overflow-auto p-6 md:p-8"><header className="mb-6 flex flex-wrap items-start justify-between gap-4"><div><h2 className="text-2xl font-semibold">{section}</h2><p className="mt-1 text-sm text-muted">Gerencie jogos Steam e trainers locais.</p></div>{section==="Biblioteca"&&<button className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50" disabled={busy} onClick={()=>void refreshGames()}>Atualizar jogos</button>}</header>
+   {message&&<div role="status" className="mb-5 rounded-md border border-line bg-panel px-4 py-3 text-sm">{message}</div>}
+   {section==="Visão geral"&&<div className="grid gap-4 sm:grid-cols-3"><Summary label="Jogos Steam" value={games.length}/><Summary label="Trainers" value={trainers.length}/><Summary label="Execuções registradas" value={history.length}/><div className="rounded-lg border border-line bg-panel p-5 sm:col-span-3"><h3 className="font-medium">Atividade recente</h3>{history.length?history.slice(0,5).map(r=><p key={r.id} className="mt-3 text-sm text-muted">Jogo {r.app_id} · {r.status} · {r.started_at}</p>):<p className="mt-3 text-sm text-muted">Nenhuma execução registrada.</p>}</div></div>}
+   {section==="Biblioteca"&&<div className="space-y-3">{games.length===0?<Empty>Não encontrei jogos instalados. Confira o caminho da Steam em Configurações.</Empty>:games.map(g=><button key={g.app_id} onClick={()=>{setSelected(g.app_id);setSection("Trainers")}} className="flex w-full flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-panel p-4 text-left hover:bg-panel-raised"><span><span className="block font-medium">{g.name}</span><span className="text-xs text-muted">AppID {g.app_id} · {g.install_dir}</span></span><span className="text-xs text-muted">{g.proton_version??(g.prefix?"Proton detectado":"Prefixo ainda não detectado")}</span></button>)}</div>}
+   {section==="Trainers"&&<div className="space-y-5"><label className="block text-sm">Jogo<select value={selected??""} onChange={e=>setSelected(Number(e.target.value)||null)} className="mt-2 block w-full rounded-md border border-line bg-panel p-3">{games.map(g=><option key={g.app_id} value={g.app_id}>{g.name} ({g.app_id})</option>)}</select></label><div className="rounded-lg border border-line bg-panel p-4"><p className="mb-3 text-sm text-muted">Selecione um arquivo .exe local. O ProtonTrainer guarda somente o caminho.</p><div className="flex flex-wrap gap-2"><input value={trainerPath} onChange={e=>setTrainerPath(e.target.value)} placeholder="/caminho/para/trainer.exe" aria-label="Caminho do trainer" className="min-w-0 flex-1 rounded-md border border-line bg-ink px-3 py-2 text-sm"/><button disabled={busy||selected===null} onClick={()=>void addTrainer()} className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50">Associar</button></div></div>{!currentGame&&<Empty>Detecte jogos Steam antes de importar trainers.</Empty>}{trainers.map(t=><article key={t.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-panel p-4"><div><strong className="text-sm">{t.name}</strong><p className="break-all text-xs text-muted">{t.exe_path}</p></div><div className="flex gap-2"><button disabled={busy||!currentGame?.prefix} title={!currentGame?.prefix?"O jogo precisa ter sido iniciado ao menos uma vez para criar o prefixo":""} onClick={()=>void runTrainer(t)} className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg disabled:opacity-50">Executar</button><button disabled={busy} onClick={()=>void deleteTrainer(t.id)} className="rounded-md border border-line px-3 py-2 text-sm">Remover</button></div></article>)}</div>}
+   {section==="Histórico"&&<div className="space-y-3">{history.length?history.map(r=><article key={r.id} className="rounded-lg border border-line bg-panel p-4"><p className="font-medium">Jogo {r.app_id} · {r.status}</p><p className="mt-1 text-xs text-muted">{r.started_at} {r.exit_code!==null?`· código ${r.exit_code}`:""}</p>{r.error&&<p className="mt-2 text-sm text-danger">{r.error}</p>}</article>):<Empty>Nenhuma execução registrada.</Empty>}</div>}
+   {section==="Configurações"&&<div className="max-w-2xl rounded-lg border border-line bg-panel p-5"><label className="block text-sm font-medium">Raiz da instalação Steam<input value={steamRoot} onChange={e=>setSteamRootValue(e.target.value)} placeholder="/home/usuario/.local/share/Steam" className="mt-2 block w-full rounded-md border border-line bg-ink px-3 py-2"/></label><p className="mt-2 text-xs text-muted">Opcional. Se vazio, procuramos nos caminhos padrão do usuário.</p><button disabled={busy} onClick={()=>void saveSteamRoot()} className="mt-4 rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50">Salvar e atualizar</button><p className="mt-6 rounded-md border border-line p-3 text-xs text-muted">Trainers são executáveis de terceiros. Não use em jogos online ou com sistemas antitrapaça. O aplicativo não baixa nem distribui trainers.</p></div>}
+  </main>
+ </div>
 }
-
-// The six screens required by the MVP. Each one is implemented in the phase
-// listed here; until then it only shows an empty state (no mock data).
-const SECTIONS: readonly Section[] = [
-  { id: "dashboard", label: "Dashboard", description: "Visão geral dos jogos, trainers e execuções recentes.", phase: 5 },
-  { id: "library", label: "Biblioteca", description: "Jogos Steam detectados neste computador.", phase: 5 },
-  { id: "game", label: "Detalhes do jogo", description: "AppID, prefixo Proton e trainers associados.", phase: 5 },
-  { id: "trainers", label: "Trainers", description: "Importar, substituir e remover trainers.", phase: 5 },
-  { id: "history", label: "Histórico", description: "Resultados e erros das execuções anteriores.", phase: 5 },
-  { id: "settings", label: "Configurações", description: "Caminhos da Steam, método de execução e preferências.", phase: 5 },
-];
-
-type BackendState =
-  | { status: "loading" }
-  | { status: "ready"; info: AppInfo }
-  | { status: "unavailable"; reason: string };
-
-function useBackend(): BackendState {
-  const [state, setState] = useState<BackendState>({ status: "loading" });
-
-  useEffect(() => {
-    if (!isTauri()) {
-      setState({ status: "unavailable", reason: "executando fora do Tauri" });
-      return;
-    }
-    let cancelled = false;
-    getAppInfo()
-      .then((info) => {
-        if (!cancelled) setState({ status: "ready", info });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setState({ status: "unavailable", reason: String(error) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
-}
-
-export default function App() {
-  const [activeId, setActiveId] = useState<string>(SECTIONS[0]?.id ?? "dashboard");
-  const backend = useBackend();
-  const active = SECTIONS.find((section) => section.id === activeId) ?? SECTIONS[0];
-
-  return (
-    <div className="flex h-full">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-panel">
-        <div className="px-5 py-5">
-          <h1 className="text-lg font-semibold tracking-tight">
-            Proton<span className="text-accent">Trainer</span>
-          </h1>
-        </div>
-        <nav className="flex-1 space-y-1 px-3" aria-label="Navegação principal">
-          {SECTIONS.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => setActiveId(section.id)}
-              aria-current={section.id === activeId ? "page" : undefined}
-              className={
-                "w-full rounded-md px-3 py-2 text-left text-sm transition-colors " +
-                (section.id === activeId
-                  ? "bg-panel-raised text-accent"
-                  : "text-muted hover:bg-panel-raised hover:text-fg")
-              }
-            >
-              {section.label}
-            </button>
-          ))}
-        </nav>
-        <footer className="border-t border-line px-5 py-3 text-xs text-muted">
-          {backend.status === "ready" && <span>v{backend.info.version}</span>}
-          {backend.status === "loading" && <span>conectando ao backend…</span>}
-          {backend.status === "unavailable" && (
-            <span title={backend.reason}>backend indisponível</span>
-          )}
-        </footer>
-      </aside>
-
-      <main className="flex-1 overflow-auto p-8">
-        {active && (
-          <section>
-            <h2 className="text-2xl font-semibold">{active.label}</h2>
-            <p className="mt-1 text-muted">{active.description}</p>
-            <div className="mt-8 rounded-lg border border-dashed border-line p-10 text-center text-sm text-muted">
-              Ainda não implementado — previsto para a Fase {active.phase}.
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
-  );
-}
+function Summary({label,value}:{label:string;value:number}){return <div className="rounded-lg border border-line bg-panel p-5"><p className="text-sm text-muted">{label}</p><p className="mt-2 text-3xl font-semibold">{value}</p></div>}
+function Empty({children}:{children:string}){return <div className="rounded-lg border border-dashed border-line p-8 text-center text-sm text-muted">{children}</div>}

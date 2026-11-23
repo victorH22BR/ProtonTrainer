@@ -24,7 +24,6 @@ pt-steam = { path = "../crates/pt-steam" }
 pt-proton = { path = "../crates/pt-proton" }
 pt-trainers = { path = "../crates/pt-trainers" }
 pt-execution = { path = "../crates/pt-execution" }
-pt-diagnostics = { path = "../crates/pt-diagnostics" }
 pt-database = { path = "../crates/pt-database" }
 
 [lints.rust]

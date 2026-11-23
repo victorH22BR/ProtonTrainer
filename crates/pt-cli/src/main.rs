@@ -51,17 +51,16 @@ fn main() -> ExitCode {
 }
 
 fn run(app_id: AppId, trainer: PathBuf, wait: u64) -> Result<ExitCode, String> {
-    let trainer = Trainer::from_path(trainer).map_err(|e| e.to_string())?;
+    let trainer = Trainer::from_path(trainer).map_err(|e| e.safe_message())?;
     let options = LaunchOptions {
         wait_for_game: (wait > 0).then(|| Duration::from_secs(wait)),
         ..LaunchOptions::default()
     };
 
-    eprintln!("ptrain: trainer -> {}", trainer.path().display());
     let status = launch(app_id, &trainer, options, || {
         eprintln!("ptrain: waiting for game {app_id}... open it in Steam (timeout {wait}s)");
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.safe_message())?;
 
     Ok(if status.success() {
         ExitCode::SUCCESS

@@ -17,10 +17,7 @@ authors = ["ProtonTrainer contributors"]
 pt-core = { path = "crates/pt-core" }
 pt-steam = { path = "crates/pt-steam" }
 pt-proton = { path = "crates/pt-proton" }
-pt-trainers = { path = "crates/pt-trainers" }
 pt-execution = { path = "crates/pt-execution" }
-pt-diagnostics = { path = "crates/pt-diagnostics" }
-pt-database = { path = "crates/pt-database" }
 
 # External crates shared by more than one member.
 # Add a dependency here only when a phase actually needs it.
@@ -29,6 +26,7 @@ serde_json = "1"
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

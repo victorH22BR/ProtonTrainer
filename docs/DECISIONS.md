@@ -27,21 +27,20 @@ comandos Tauri apenas adaptam. Não há crate `pt-app` por enquanto.
 permite `cargo test --workspace` em qualquer máquina, inclusive CI mínimo.
 **Custo:** dois `Cargo.lock`; CI tem um job dedicado ao shell.
 
-## ADR-004 — Dependências adicionadas por fase
+## ADR-004 — Dependências adicionadas quando usadas
 
-**Decisão:** na Fase 0 só existem `serde`, `serde_json` (testes) e `thiserror`.
-`rusqlite`, parser VDF, `tracing` e outros entram quando a fase que os usa
-começar, com a escolha justificada aqui.
-**Motivo:** nada de dependências sem uso; decisões tomadas com fixtures reais.
-**Provisório:** SQLite via `rusqlite` + migrations (Fase 3); `tracing` para logs
-(Fase 1+).
+**Decisão:** dependências entram junto da funcionalidade. SQLite usa `rusqlite`
+com SQLite bundled; VDF é lido por parser pequeno local para limitar a stack e
+permitir fixtures determinísticas. Logs estruturados com `tracing` ficam
+pendentes de uma necessidade concreta.
+**Motivo:** reduzir dependências externas do núcleo e manter builds reproduzíveis.
 
 ## ADR-005 — Trainers referenciados por caminho
 
 **Decisão:** o app guarda o caminho do `.exe`, não uma cópia.
 **Motivo:** requisito explícito ("salvar o caminho do arquivo") e evita
-redistribuir executáveis de terceiros. O hash registrado na importação detecta
-alterações.
+redistribuir executáveis de terceiros. Hoje são armazenados tamanho e caminho;
+hash de conteúdo permanece pendente.
 
 ## ADR-006 — `AppId` estrito
 

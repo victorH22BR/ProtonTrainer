@@ -8,7 +8,5 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-pt-core.workspace = true
-
 [lints]
 workspace = true
