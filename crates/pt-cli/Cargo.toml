@@ -1,0 +1,20 @@
+[package]
+name = "pt-cli"
+description = "Command-line frontend for ProtonTrainer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ptrain"
+path = "src/main.rs"
+
+[dependencies]
+pt-core.workspace = true
+pt-execution.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true
